@@ -45,9 +45,9 @@ Delivery target: working demo by Day 5, verification Day 6, stakeholder demo Day
 - Confirm PC access, credentials, and a test phone are available every day. If any slips, the timeline slips 1:1.
 - Send the VideoSDK support question (Section G) and note the date.
 
-## Phase 1 — Prove the connection and create storage
+## Phase 1 — Prove the connection and create storage [DONE]
 
-**Calendar days:** Day 1
+**Calendar days:** Day 1 — Status: DONE
 
 **What gets built**
 - `backend.py`: local FastAPI backend. Disable automatic docs routes (`docs_url=None`, `redoc_url=None`, `openapi_url=None`).
@@ -71,16 +71,24 @@ Delivery target: working demo by Day 5, verification Day 6, stakeholder demo Day
 
 **NOT in this phase:** dashboard styling, SSE, Hang Up, outcome extraction.
 
-## Phase 2 — Start calls and show real status
+## Phase 2 — Start calls and show real status [DONE]
 
-**Calendar days:** Day 2
+**Calendar days:** Day 2 — Status: DONE
 
 **What gets built**
-- `dashboard.html`, served at `GET /`: phone input, Start Call button, call list, selected-call panel.
-- `GET /calls/stream` (SSE — Server-Sent Events: a connection that pushes backend updates to the page).
+- Dashboard UI split into `static/index.html`, `static/style.css`, and `static/app.js`, served at `GET /`: phone input, Start Call button, call list, selected-call panel.
+- `GET /calls/stream` (SSE — Server-Sent Events): pushes strictly `call.updated` events to the browser.
+- Worker lifecycle events (`worker.started`, `worker.stopped`, `worker.error`) emit `call.updated` with `worker_state` to the browser; `worker.heartbeat` does NOT emit `call.updated`.
+- When `call.updated` arrives in the dashboard, it re-fetches the latest call via `GET /calls/{id}` to update both the call list and detail panel with live `worker_state`.
 - Polling VideoSDK about every 3 seconds while a call is active; each poll saves the raw response to `calls.provider_raw_json`.
-- Save real VideoSDK polling responses during active calls to `fixtures/day2/` as raw JSON fixtures.
-- Normalise real provider responses into dashboard statuses.
+- Save real VideoSDK polling responses during active calls to `fixtures/day2/` as raw JSON fixtures (saved on both new top-level statuses and new timelog status names).
+- Real VideoSDK provider statuses: top-level statuses observed are `initiated`, `ringing`, `answered`, `missed`, and `ended`.
+- Final status resolution: VideoSDK returns `status: "ended"` for all terminated calls. The backend inspects `data.timelog`:
+  - `answered` present $\rightarrow$ dashboard status `completed`.
+  - `missed` present $\rightarrow$ dashboard status `no_answer`, provider message saved to `calls.error_message`.
+  - neither present (e.g. rejected or busy) $\rightarrow$ dashboard status `failed`, last timelog message saved to `calls.error_message`.
+  - missing/empty timelog $\rightarrow$ defaults to `completed` with a warning log.
+- Context-aware alert box in details panel: `no_answer` and `busy` display with an amber/neutral box labelled `"Reason:"`, while `failed` and `unknown` display with a red box labelled `"Error:"`.
 - Display "last provider update" time.
 - Register `GET /calls/stream` before `GET /calls/{id}` so the router doesn't treat "stream" as an ID.
 
@@ -283,7 +291,7 @@ No contacts table, recordings table, or separate queue table.
 - Internal endpoint is reachable locally only.
 
 ### 1. GET /
-Returns `dashboard.html` (HTML with embedded JavaScript and styles). No content negotiation.
+Returns `static/index.html` (HTML served with `/static/style.css` and `/static/app.js`). No content negotiation.
 
 ### 2. POST /calls  (create only)
 Request:
@@ -363,17 +371,13 @@ Returns the full transcript (no cap in v1). Errors: 404, 503.
 ### 6. GET /calls/stream
 `GET /calls/stream?after=28` with `Accept: text/event-stream`. On automatic reconnect, accept `Last-Event-ID` as the cursor. Browser uses the built-in `EventSource` reconnect; the page shows "Reconnecting" while disconnected.
 
-Response `200` as SSE frames:
+Response `200` as SSE frames (pushes strictly `call.updated` events to browser):
 ```
-id: 29
-event: transcript.final
-data: {"call_id":"c_123","speaker":"agent","text":"Thank you."}
-
 id: 30
 event: call.updated
-data: {"call_id":"c_123","status":"completed"}
+data: {"call_id":"c_123","status":"completed","worker_state":"stopped"}
 ```
-Replay saved events after the cursor, then stream new ones. Send a keepalive comment every 15 seconds.
+Replay saved `call.updated` events after the cursor, then stream new ones. Emitted on call status changes and on worker lifecycle events (`worker.started`, `worker.stopped`, `worker.error`), but NOT on `worker.heartbeat`. Dashboard on receiving `call.updated` re-fetches `GET /calls/{id}` to refresh both call list and detail panel with fresh server state. Send a keepalive comment every 15 seconds.
 Errors: 422 invalid cursor; 503 before opening if storage is down.
 
 ### 7. POST /internal/calls/{id}/events
@@ -427,7 +431,7 @@ return {
     "status": data.get("status"),
 }
 ```
-The real VideoSDK SIP API response stores the call identifier in `data.id` (not `callId` or `sipCallId`). The backend caller saves these against the internal call ID immediately. Database writes stay out of `dial.py`.
+The real VideoSDK SIP API response stores the provider call identifier in `data.id` (not `callId` or `sipCallId`). The backend caller saves these against the internal call ID immediately. Database writes stay out of `dial.py`.
 
 The provider's raw status is `"initiated"`, which does not exist in `calls.status` CHECK constraints; the backend maps this to `'dialing'` on successful dial while preserving the raw status in `calls.provider_raw_json`.
 
