@@ -1,2 +1,9 @@
-.venv
 .env
+*.env
+__pycache__/
+venv/
+.venv/
+*.sqlite
+*.sqlite-journal
+*.db
+*.log
