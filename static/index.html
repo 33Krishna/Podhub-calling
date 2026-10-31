@@ -11,7 +11,7 @@
   <header>
     <div class="brand">
       <span>PodHub Calling</span>
-      <span class="brand-badge">Phase 2</span>
+      <span class="brand-badge">Phase 3a</span>
     </div>
     <div class="connection-status">
       <div id="sse-dot" class="status-dot"></div>
@@ -87,6 +87,20 @@
         </div>
 
         <div id="detail-error" class="detail-alert" style="display: none;"></div>
+      </div>
+
+      <!-- Live Transcript Card -->
+      <div id="transcript-card" class="card transcript-card" style="display: none;">
+        <div class="card-title">
+          <span>Live Transcript</span>
+          <span id="transcript-count" class="transcript-count">0 messages</span>
+        </div>
+        <div id="transcript-container" class="transcript-container">
+          <div id="transcript-empty" class="transcript-empty">
+            No conversation yet. Transcript will appear here live once speech begins.
+          </div>
+          <div id="transcript-messages" class="transcript-messages"></div>
+        </div>
       </div>
     </main>
   </div>

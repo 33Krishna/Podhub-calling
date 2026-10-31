@@ -329,3 +329,90 @@ button.btn-primary:disabled {
   color: #fde68a;
 }
 
+/* Transcript Card & Messages */
+.transcript-card {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 280px;
+}
+
+.transcript-count {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.transcript-container {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 480px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 6px;
+}
+
+.transcript-empty {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-style: italic;
+  padding: 32px 0;
+  text-align: center;
+}
+
+.transcript-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.transcript-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border);
+}
+
+.transcript-msg-agent {
+  border-left: 3px solid var(--primary);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.transcript-msg-prospect {
+  border-left: 3px solid var(--success);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.transcript-msg-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.speaker-badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.speaker-badge-agent {
+  color: #60a5fa;
+}
+
+.speaker-badge-prospect {
+  color: #34d399;
+}
+
+.transcript-msg-text {
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--text-main);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+

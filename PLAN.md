@@ -96,7 +96,7 @@ Delivery target: working demo by Day 5, verification Day 6, stakeholder demo Day
 
 **NOT in this phase:** transcript rendering, browser audio, outcome extraction, extra pages.
 
-## Phase 3a — Live transcript
+## Phase 3a — Live transcript [DONE]
 
 **Calendar days:** Day 3 to Day 4 morning
 

@@ -542,11 +542,22 @@ async def get_calls_stream(
             if await request.is_disconnected():
                 break
 
-            events = db.get_events_after(cursor, event_types=["call.updated"], limit=50)
+            events = db.get_events_after(
+                cursor, event_types=["call.updated", "transcript.final"], limit=50
+            )
             if events:
                 for ev in events:
                     cursor = ev["id"]
-                    yield f"id: {ev['id']}\nevent: {ev['type']}\ndata: {ev['payload_json']}\n\n"
+                    if ev["type"] == "transcript.final":
+                        try:
+                            payload = json.loads(ev["payload_json"])
+                        except Exception:
+                            payload = {}
+                        payload["call_id"] = ev["call_id"]
+                        payload["event_id"] = ev["id"]
+                        yield f"id: {ev['id']}\nevent: {ev['type']}\ndata: {json.dumps(payload)}\n\n"
+                    else:
+                        yield f"id: {ev['id']}\nevent: {ev['type']}\ndata: {ev['payload_json']}\n\n"
                 continue
 
             try:
@@ -653,6 +664,11 @@ async def post_internal_event(call_id: str, req: EventRequest, response: Respons
     if is_duplicate:
         response.status_code = status.HTTP_200_OK
         return {"event_id": event_id, "accepted": True}
+
+    # Notify SSE listeners on newly saved transcript.final
+    if req.type == "transcript.final":
+        evt = get_sse_notify_event()
+        evt.set()
 
     # Emit call.updated for worker lifecycle changes (not heartbeat)
     if req.type in ("worker.started", "worker.stopped", "worker.error"):

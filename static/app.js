@@ -15,6 +15,15 @@ const detailsCard = document.getElementById("details-card");
 const sseDot = document.getElementById("sse-dot");
 const sseText = document.getElementById("sse-text");
 
+const transcriptCard = document.getElementById("transcript-card");
+const transcriptCount = document.getElementById("transcript-count");
+const transcriptContainer = document.getElementById("transcript-container");
+const transcriptEmpty = document.getElementById("transcript-empty");
+const transcriptMessages = document.getElementById("transcript-messages");
+
+// Per-call transcript storage: Map<callId, Map<eventId, {event_id, speaker, text}>>
+const callTranscripts = new Map();
+
 const detailPhone = document.getElementById("detail-phone");
 const detailBadge = document.getElementById("detail-badge");
 const detailId = document.getElementById("detail-id");
@@ -48,14 +57,117 @@ function renderBadge(status) {
   return `<span class="${cls}">${status || "unknown"}</span>`;
 }
 
+function scrollTranscriptToBottom() {
+  if (transcriptContainer) {
+    transcriptContainer.scrollTop = transcriptContainer.scrollHeight;
+  }
+}
+
+function createTranscriptElement(item) {
+  const msgDiv = document.createElement("div");
+  const isAgent = item.speaker === "agent";
+  msgDiv.className = "transcript-msg " + (isAgent ? "transcript-msg-agent" : "transcript-msg-prospect");
+  msgDiv.dataset.eventId = item.event_id;
+
+  const headerDiv = document.createElement("div");
+  headerDiv.className = "transcript-msg-header";
+
+  const speakerSpan = document.createElement("span");
+  speakerSpan.className = "speaker-badge " + (isAgent ? "speaker-badge-agent" : "speaker-badge-prospect");
+  speakerSpan.textContent = isAgent ? "Ananya (Agent)" : "Prospect";
+
+  headerDiv.appendChild(speakerSpan);
+
+  const textDiv = document.createElement("div");
+  textDiv.className = "transcript-msg-text";
+  // Strict textContent ONLY - no innerHTML for transcript text
+  textDiv.textContent = item.text || "";
+
+  msgDiv.appendChild(headerDiv);
+  msgDiv.appendChild(textDiv);
+  return msgDiv;
+}
+
+function addTranscriptItems(callId, items) {
+  if (!callTranscripts.has(callId)) {
+    callTranscripts.set(callId, new Map());
+  }
+  const itemsMap = callTranscripts.get(callId);
+  let addedCount = 0;
+  for (const item of items) {
+    if (!item || item.event_id === undefined || item.event_id === null) continue;
+    const eventId = Number(item.event_id);
+    if (!itemsMap.has(eventId)) {
+      itemsMap.set(eventId, {
+        event_id: eventId,
+        speaker: item.speaker || "unknown",
+        text: item.text || ""
+      });
+      addedCount++;
+    }
+  }
+  return addedCount;
+}
+
+function renderTranscript(callId) {
+  if (callId !== selectedCallId) return;
+
+  const itemsMap = callTranscripts.get(callId);
+  const items = itemsMap ? Array.from(itemsMap.values()) : [];
+  items.sort((a, b) => a.event_id - b.event_id);
+
+  transcriptCount.textContent = `${items.length} ${items.length === 1 ? "message" : "messages"}`;
+
+  if (items.length === 0) {
+    transcriptEmpty.style.display = "block";
+    transcriptMessages.innerHTML = "";
+    return;
+  }
+
+  transcriptEmpty.style.display = "none";
+
+  const currentElements = transcriptMessages.querySelectorAll(".transcript-msg");
+
+  let needFullReRender = false;
+  if (currentElements.length > items.length) {
+    needFullReRender = true;
+  } else {
+    for (let i = 0; i < currentElements.length; i++) {
+      if (Number(currentElements[i].dataset.eventId) !== items[i].event_id) {
+        needFullReRender = true;
+        break;
+      }
+    }
+  }
+
+  if (needFullReRender) {
+    transcriptMessages.innerHTML = "";
+    items.forEach(item => {
+      transcriptMessages.appendChild(createTranscriptElement(item));
+    });
+    scrollTranscriptToBottom();
+  } else {
+    let appended = false;
+    for (let i = currentElements.length; i < items.length; i++) {
+      transcriptMessages.appendChild(createTranscriptElement(items[i]));
+      appended = true;
+    }
+    if (appended) {
+      scrollTranscriptToBottom();
+    }
+  }
+}
+
 function updateDetailsPanel(call) {
   if (!call) {
     emptyState.style.display = "block";
     detailsCard.style.display = "none";
+    transcriptCard.style.display = "none";
     return;
   }
   emptyState.style.display = "none";
   detailsCard.style.display = "block";
+  transcriptCard.style.display = "flex";
 
   detailPhone.textContent = call.phone_number;
   detailBadge.className = "badge badge-" + (call.status || "unknown");
@@ -81,6 +193,11 @@ function updateDetailsPanel(call) {
   } else {
     detailError.style.display = "none";
   }
+
+  if (call.transcript && Array.isArray(call.transcript)) {
+    addTranscriptItems(call.id, call.transcript);
+  }
+  renderTranscript(call.id);
 }
 
 function renderCallsList() {
@@ -108,6 +225,7 @@ function renderCallsList() {
 async function selectCall(callId) {
   selectedCallId = callId;
   renderCallsList();
+  renderTranscript(callId);
   try {
     const res = await fetch(`/calls/${callId}`);
     if (res.ok) {
@@ -206,6 +324,25 @@ function initSSE() {
       }
     } catch (err) {
       console.error("Error processing call.updated event:", err);
+    }
+  });
+
+  // Listen to transcript.final events
+  eventSource.addEventListener("transcript.final", (event) => {
+    try {
+      if (event.lastEventId) {
+        lastEventCursor = parseInt(event.lastEventId, 10) || lastEventCursor;
+      }
+      const data = JSON.parse(event.data);
+      const callId = data.call_id;
+      if (!callId) return;
+
+      const added = addTranscriptItems(callId, [data]);
+      if (added > 0 && selectedCallId === callId) {
+        renderTranscript(callId);
+      }
+    } catch (err) {
+      console.error("Error processing transcript.final event:", err);
     }
   });
 }
