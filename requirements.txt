@@ -1,0 +1,8 @@
+videosdk-agents
+videosdk-plugins-google
+python-dotenv
+requests
+google-genai
+sanotts
+numpy
+

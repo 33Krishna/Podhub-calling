@@ -10,9 +10,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 VIDEOSDK_TOKEN = os.getenv("VIDEOSDK_TOKEN", "").strip()
-ROUTING_RULE_ID = "rr_akbsbe"
-CALLER_ID = "+917971413941"
-DEFAULT_TARGET = "+919266775396"
+ROUTING_RULE_ID = "rr_q8y23w"
+CALLER_ID = "+918065354620"
+DEFAULT_TARGET = "+918117935016"
 
 API_URL = "https://api.videosdk.live/v2/sip/call"
 
@@ -43,12 +43,15 @@ def dial(target: str) -> dict:
         elif resp.status_code == 403:
             logger.error(
                 "403 usually means the routing rule, gateway, or caller ID is not "
-                "authorized. Verify rr_akbsbe is Active and bound to my_telephony_agent."
+                "authorized. Verify %s is Active and bound to my_telephony_agent.",
+                ROUTING_RULE_ID,
             )
         elif resp.status_code == 400:
             logger.error(
-                "400 usually means a field mismatch. Check that sipCallFrom matches "
-                "a number on the routing rule, and that routingRuleId is exactly rr_akbsbe."
+                "400 usually means a field mismatch. Check that sipCallFrom (%s) matches "
+                "a number on the routing rule, and that routingRuleId is %s.",
+                CALLER_ID,
+                ROUTING_RULE_ID,
             )
         resp.raise_for_status()
 
