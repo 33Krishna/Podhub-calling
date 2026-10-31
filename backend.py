@@ -6,14 +6,16 @@ import re
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from fastapi import FastAPI, HTTPException, Query, Request, Response, status
+from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import db
-from dial import dial
+from dial import VIDEOSDK_TOKEN, dial
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("backend")
@@ -21,9 +23,155 @@ logger = logging.getLogger("backend")
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "day1"
 FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
 
-# Dispatcher state
+FIXTURES_DAY2_DIR = Path(__file__).parent / "fixtures" / "day2"
+FIXTURES_DAY2_DIR.mkdir(parents=True, exist_ok=True)
+
+STATIC_DIR = Path(__file__).parent / "static"
+INDEX_PATH = STATIC_DIR / "index.html"
+
+# Dispatcher & Poller state
 dispatch_paused: bool = False
 dispatcher_task: Optional[asyncio.Task] = None
+poller_task: Optional[asyncio.Task] = None
+
+ENABLE_DISPATCHER: bool = True
+ENABLE_POLLER: bool = True
+POLL_INTERVAL_SECONDS: float = 3.0
+
+# SSE wake-up event
+_sse_notify_event: Optional[asyncio.Event] = None
+
+
+def get_sse_notify_event() -> asyncio.Event:
+    global _sse_notify_event
+    if _sse_notify_event is None:
+        _sse_notify_event = asyncio.Event()
+    return _sse_notify_event
+
+
+def notify_call_updated(
+    call_id: str,
+    new_status: Optional[str] = None,
+    worker_state: Optional[str] = None,
+) -> None:
+    db.record_call_updated_event(
+        call_id,
+        new_status=new_status,
+        worker_state=worker_state,
+    )
+    if _sse_notify_event is not None:
+        _sse_notify_event.set()
+
+
+def normalize_provider_status(
+    raw_status: str,
+    timelog: Optional[List[Dict[str, Any]]] = None,
+    call_id: Optional[str] = None,
+) -> Optional[str]:
+    if not raw_status:
+        return None
+    s = str(raw_status).strip().lower()
+    if s == "initiated":
+        return "dialing"
+    elif s == "ringing":
+        return "ringing"
+    elif s in ("in-progress", "in_progress", "ongoing", "connected", "answered"):
+        return "connected"
+    elif s in ("completed", "ended", "terminated", "hangup"):
+        if timelog is not None:
+            if not timelog:
+                logger.warning(
+                    "Call %s: provider status is '%s' but data.timelog is missing/empty; defaulting to completed",
+                    call_id or "unknown",
+                    raw_status,
+                )
+                return "completed"
+            timelog_statuses = [
+                str(entry.get("status", "")).strip().lower()
+                for entry in timelog
+                if isinstance(entry, dict)
+            ]
+            if "answered" in timelog_statuses:
+                return "completed"
+            elif "missed" in timelog_statuses:
+                return "no_answer"
+            else:
+                return "failed"
+        return "completed"
+    elif s == "busy":
+        return "busy"
+    elif s in ("no-answer", "no_answer", "unanswered", "missed"):
+        return "no_answer"
+    elif s in ("failed", "canceled", "cancelled", "rejected"):
+        return "failed"
+    return None
+
+
+def resolve_call_status_and_error(
+    raw_status: str,
+    timelog: Optional[List[Dict[str, Any]]] = None,
+    call_id: Optional[str] = None,
+) -> Tuple[Optional[str], Optional[str]]:
+    if not raw_status:
+        return None, None
+    s = str(raw_status).strip().lower()
+    if s in ("completed", "ended", "terminated", "hangup"):
+        if not timelog:
+            logger.warning(
+                "Call %s: provider status is '%s' but data.timelog is missing/empty; defaulting to completed",
+                call_id or "unknown",
+                raw_status,
+            )
+            return "completed", None
+
+        timelog_statuses = [
+            str(entry.get("status", "")).strip().lower()
+            for entry in timelog
+            if isinstance(entry, dict)
+        ]
+        if "answered" in timelog_statuses:
+            return "completed", None
+        elif "missed" in timelog_statuses:
+            missed_entry = next(
+                (
+                    e
+                    for e in timelog
+                    if isinstance(e, dict)
+                    and str(e.get("status", "")).strip().lower() == "missed"
+                ),
+                None,
+            )
+            provider_msg = (
+                missed_entry.get("message") if missed_entry else None
+            ) or "status 480 Callee currently unavailable"
+            return "no_answer", provider_msg
+        else:
+            last_msg = None
+            for e in reversed(timelog):
+                if isinstance(e, dict) and e.get("message"):
+                    last_msg = e.get("message")
+                    break
+            logger.warning(
+                "Call %s: ended with neither answered nor missed in timelog. Real timelog statuses: %s. Last message: %s",
+                call_id or "unknown",
+                timelog_statuses,
+                last_msg,
+            )
+            return "failed", last_msg or "Call ended without answered or missed status"
+    elif s in ("no-answer", "no_answer", "unanswered", "missed"):
+        missed_entry = next(
+            (
+                e
+                for e in (timelog or [])
+                if isinstance(e, dict)
+                and str(e.get("status", "")).strip().lower() == "missed"
+            ),
+            None,
+        )
+        provider_msg = missed_entry.get("message") if missed_entry else None
+        return "no_answer", provider_msg
+    else:
+        return normalize_provider_status(raw_status, timelog=timelog, call_id=call_id), None
 
 
 async def dispatch_one_call() -> bool:
@@ -43,6 +191,7 @@ async def dispatch_one_call() -> bool:
 
     logger.info("Dispatching call %s to %s...", call_id, phone_number)
     db.update_call(call_id, status="dialing")
+    notify_call_updated(call_id, "dialing")
 
     # Safety Guard: refuse real dialing unless explicitly enabled
     allow_real_dial = os.getenv("PODHUB_ALLOW_REAL_DIAL", "0").strip() == "1"
@@ -56,6 +205,7 @@ async def dispatch_one_call() -> bool:
             status="failed",
             error_message="Real dialing disabled (PODHUB_ALLOW_REAL_DIAL != 1)",
         )
+        notify_call_updated(call_id, "failed")
         return True
 
     try:
@@ -70,20 +220,24 @@ async def dispatch_one_call() -> bool:
             # Explicit provider rejection (e.g. invalid number, routing rule misconfig)
             logger.error("Provider explicitly rejected dial for %s: %s %s", call_id, status_code, resp_text)
             db.update_call(call_id, status="failed", error_message=f"Provider rejected ({status_code}): {resp_text}")
+            notify_call_updated(call_id, "failed")
         else:
             # 5xx ambiguous error
             logger.error("Provider returned server error %s for %s. Pausing dispatch.", status_code, call_id)
             db.update_call(call_id, status="unknown", error_message=f"Provider error ({status_code}): {resp_text}")
+            notify_call_updated(call_id, "unknown")
             dispatch_paused = True
         return True
     except (requests.Timeout, requests.ConnectionError) as exc:
         logger.error("Ambiguous network error/timeout during dial for %s: %s. Pausing dispatch.", call_id, exc)
         db.update_call(call_id, status="unknown", error_message=f"Network error/timeout: {exc}")
+        notify_call_updated(call_id, "unknown")
         dispatch_paused = True
         return True
     except Exception as exc:
         logger.error("Unexpected error during dial for %s: %s. Pausing dispatch.", call_id, exc)
         db.update_call(call_id, status="unknown", error_message=f"Unexpected error: {exc}")
+        notify_call_updated(call_id, "unknown")
         dispatch_paused = True
         return True
 
@@ -111,6 +265,7 @@ async def dispatch_one_call() -> bool:
         if provider_call_id:
             update_fields["provider_call_id"] = provider_call_id
         db.update_call(call_id, **update_fields)
+        notify_call_updated(call_id, "unknown")
         dispatch_paused = True
     else:
         logger.info("Dial succeeded for %s: provider_call_id=%s, room_id=%s", call_id, provider_call_id, room_id)
@@ -121,6 +276,7 @@ async def dispatch_one_call() -> bool:
             status="dialing",
             provider_raw_json=json.dumps(raw_body),
         )
+        notify_call_updated(call_id, "dialing")
     return True
 
 
@@ -136,20 +292,161 @@ async def dispatcher_loop():
             logger.error("Unhandled error in dispatcher loop: %s", exc)
 
 
-ENABLE_DISPATCHER: bool = True
+async def poll_active_calls() -> None:
+    active_calls = db.get_active_calls()
+    for call in active_calls:
+        provider_call_id = call.get("provider_call_id")
+        if not provider_call_id:
+            continue
+
+        call_id = call["id"]
+        current_status = call["status"]
+        url = f"https://api.videosdk.live/v2/sip/call/{provider_call_id}"
+        headers = {"Authorization": VIDEOSDK_TOKEN}
+
+        try:
+            resp = await asyncio.to_thread(requests.get, url, headers=headers, timeout=10)
+        except Exception as exc:
+            logger.error("Poll request failed for call %s (%s): %s", call_id, provider_call_id, exc)
+            continue
+
+        if resp.status_code != 200:
+            logger.error(
+                "Poll returned non-200 (%s) for call %s (%s): %s",
+                resp.status_code,
+                call_id,
+                provider_call_id,
+                resp.text,
+            )
+            continue
+
+        try:
+            raw_body = resp.json()
+        except Exception as exc:
+            logger.error("Failed to parse poll JSON for call %s: %s", call_id, exc)
+            continue
+
+        # 200 OK: Update last_provider_poll_at and provider_raw_json
+        now_iso = db.utc_now_iso()
+        raw_json_str = json.dumps(raw_body)
+        db.update_call(call_id, last_provider_poll_at=now_iso, provider_raw_json=raw_json_str)
+
+        data = raw_body.get("data", raw_body)
+        raw_status = data.get("status")
+        timelog = data.get("timelog")
+        if not isinstance(timelog, list):
+            timelog = None
+
+        if raw_status:
+            safe_status = re.sub(r"[^a-zA-Z0-9_\-]", "", str(raw_status))
+            fixture_file = FIXTURES_DAY2_DIR / f"poll_{safe_status}.json"
+            if not fixture_file.exists():
+                try:
+                    with open(fixture_file, "w", encoding="utf-8") as f:
+                        json.dump(raw_body, f, indent=2)
+                    logger.info("Saved fixture for new raw status '%s' to %s", safe_status, fixture_file)
+                except Exception as exc:
+                    logger.error("Failed to write fixture %s: %s", fixture_file, exc)
+
+            # Fixtures for timelog statuses
+            if timelog:
+                for entry in timelog:
+                    if not isinstance(entry, dict):
+                        continue
+                    t_status = entry.get("status")
+                    if not t_status:
+                        continue
+                    safe_t = re.sub(r"[^a-zA-Z0-9_\-]", "", str(t_status))
+                    if not safe_t:
+                        continue
+
+                    # For ended call with sub-statuses (e.g. missed, answered, busy, rejected)
+                    if safe_status == "ended" and safe_t not in ("initiated", "ringing", "ended"):
+                        ended_fixture_file = FIXTURES_DAY2_DIR / f"poll_ended_{safe_t}.json"
+                        if not ended_fixture_file.exists():
+                            try:
+                                with open(ended_fixture_file, "w", encoding="utf-8") as f:
+                                    json.dump(raw_body, f, indent=2)
+                                logger.info(
+                                    "Saved fixture for ended call with timelog status '%s' to %s",
+                                    safe_t,
+                                    ended_fixture_file,
+                                )
+                            except Exception as exc:
+                                logger.error("Failed to write fixture %s: %s", ended_fixture_file, exc)
+
+                    # Also save standalone fixture for new timelog status
+                    t_fixture_file = FIXTURES_DAY2_DIR / f"poll_{safe_t}.json"
+                    if not t_fixture_file.exists():
+                        try:
+                            with open(t_fixture_file, "w", encoding="utf-8") as f:
+                                json.dump(raw_body, f, indent=2)
+                            logger.info(
+                                "Saved fixture for new timelog status '%s' to %s", safe_t, t_fixture_file
+                            )
+                        except Exception as exc:
+                            logger.error("Failed to write fixture %s: %s", t_fixture_file, exc)
+
+            normalized, err_msg = resolve_call_status_and_error(
+                raw_status, timelog=timelog, call_id=call_id
+            )
+            if normalized is None:
+                # Rule 1: Do NOT change status. Log warning, raw response already saved.
+                logger.warning(
+                    "Unrecognized provider status '%s' for call %s; keeping status '%s' unchanged",
+                    raw_status,
+                    call_id,
+                    current_status,
+                )
+            elif normalized != current_status:
+                logger.info(
+                    "Call %s status updated: %s -> %s (raw: %s)",
+                    call_id,
+                    current_status,
+                    normalized,
+                    raw_status,
+                )
+                update_kwargs: Dict[str, Any] = {"status": normalized}
+                if normalized in ("completed", "busy", "no_answer", "failed"):
+                    update_kwargs["ended_at"] = now_iso
+                if err_msg:
+                    update_kwargs["error_message"] = err_msg
+                db.update_call(call_id, **update_kwargs)
+                notify_call_updated(call_id, normalized)
+
+
+async def poller_loop():
+    logger.info("Poller loop started.")
+    while True:
+        try:
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+            await poll_active_calls()
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            logger.error("Unhandled error in poller loop: %s", exc)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global dispatcher_task
+    global dispatcher_task, poller_task, _sse_notify_event
+    _sse_notify_event = asyncio.Event()
     db.init_db()
     if ENABLE_DISPATCHER:
         dispatcher_task = asyncio.create_task(dispatcher_loop())
+    if ENABLE_POLLER:
+        poller_task = asyncio.create_task(poller_loop())
     yield
     if dispatcher_task:
         dispatcher_task.cancel()
         try:
             await dispatcher_task
+        except asyncio.CancelledError:
+            pass
+    if poller_task:
+        poller_task.cancel()
+        try:
+            await poller_task
         except asyncio.CancelledError:
             pass
 
@@ -160,6 +457,8 @@ app = FastAPI(
     openapi_url=None,
     lifespan=lifespan,
 )
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 class CreateCallRequest(BaseModel):
@@ -174,6 +473,16 @@ class EventRequest(BaseModel):
 
 
 PHONE_REGEX = re.compile(r"^\+[1-9]\d{7,14}$")
+
+
+@app.get("/", response_class=HTMLResponse)
+async def get_dashboard():
+    if not INDEX_PATH.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "Dashboard template not found"},
+        )
+    return HTMLResponse(content=INDEX_PATH.read_text(encoding="utf-8"))
 
 
 @app.post("/calls", status_code=status.HTTP_202_ACCEPTED)
@@ -203,11 +512,59 @@ async def post_calls(req: CreateCallRequest, response: Response):
 
     call_id = f"c_{uuid.uuid4().hex[:12]}"
     created = db.create_call(call_id, req.idempotency_key, cleaned_phone)
+    notify_call_updated(call_id, "queued")
     return {
         "id": created["id"],
         "status": created["status"],
         "replayed": False,
     }
+
+
+@app.get("/calls/stream")
+async def get_calls_stream(
+    request: Request,
+    after: Optional[int] = Query(None),
+):
+    last_event_id_header = request.headers.get("Last-Event-ID")
+    cursor = 0
+    if after is not None:
+        cursor = after
+    elif last_event_id_header:
+        try:
+            cursor = int(last_event_id_header)
+        except ValueError:
+            cursor = 0
+
+    async def event_generator():
+        nonlocal cursor
+        yield ": connected\n\n"
+        while True:
+            if await request.is_disconnected():
+                break
+
+            events = db.get_events_after(cursor, event_types=["call.updated"], limit=50)
+            if events:
+                for ev in events:
+                    cursor = ev["id"]
+                    yield f"id: {ev['id']}\nevent: {ev['type']}\ndata: {ev['payload_json']}\n\n"
+                continue
+
+            try:
+                evt = get_sse_notify_event()
+                evt.clear()
+                await asyncio.wait_for(evt.wait(), timeout=15.0)
+            except asyncio.TimeoutError:
+                yield ": keepalive\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/calls")
@@ -296,6 +653,17 @@ async def post_internal_event(call_id: str, req: EventRequest, response: Respons
     if is_duplicate:
         response.status_code = status.HTTP_200_OK
         return {"event_id": event_id, "accepted": True}
+
+    # Emit call.updated for worker lifecycle changes (not heartbeat)
+    if req.type in ("worker.started", "worker.stopped", "worker.error"):
+        latest_call = db.get_call_by_id(call_id)
+        latest_status = latest_call["status"] if latest_call else call["status"]
+        latest_worker_state = latest_call.get("worker_state") if latest_call else None
+        notify_call_updated(
+            call_id,
+            new_status=latest_status,
+            worker_state=latest_worker_state,
+        )
 
     response.status_code = status.HTTP_201_CREATED
     return {"event_id": event_id, "accepted": True}

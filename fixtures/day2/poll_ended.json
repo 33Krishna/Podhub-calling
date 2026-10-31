@@ -1,0 +1,64 @@
+{
+  "statusCode": 200,
+  "data": {
+    "id": "f1438217-7279-47d5-81d9-92b29b19e188",
+    "type": "outbound",
+    "transport": "sip",
+    "gatewayId": "221fd865-aec6-4c2b-8103-3f2b53df2752",
+    "ruleId": "rr_q8y23w",
+    "roomId": "k911-pyjt-yrtv",
+    "to": "+918117935016",
+    "from": "+918065354620",
+    "transfer": [],
+    "sessionId": "6ae5e41d9a9e3242a1811e05",
+    "status": "ended",
+    "start": "2026-10-31T12:50:37.521Z",
+    "end": "2026-10-31T12:51:42.089Z",
+    "timelog": [
+      {
+        "timestamp": "2026-10-31T12:50:37.518Z",
+        "status": "initiated",
+        "_id": "6ae5e41dcfb646cd19ea6d68"
+      },
+      {
+        "timestamp": "2026-10-31T12:50:44.078Z",
+        "status": "ringing",
+        "_id": "6ae5e4241f42fee7d25b76c0"
+      },
+      {
+        "timestamp": "2026-10-31T12:50:49.316Z",
+        "status": "answered",
+        "_id": "6ae5e4298abbe13abd746c46"
+      },
+      {
+        "timestamp": "2026-10-31T12:51:41.866Z",
+        "status": "ended",
+        "message": "Call ended by callee",
+        "_id": "6ae5e45e8abbe13abd746e36"
+      }
+    ],
+    "region": "in002",
+    "additionalDetails": {
+      "dispatchMessage": "Agent dispatch requested successfully.",
+      "fromDetails": {
+        "uri": "sip:+918065354620@in1.sip.videosdk.live:5060",
+        "family": "ipv4",
+        "host": "in1.sip.videosdk.live",
+        "user": "+918065354620",
+        "transport": "udp"
+      },
+      "toDetails": {
+        "uri": "sip:+918117935016@8255a51d.sip.vobiz.ai",
+        "family": "ipv4",
+        "host": "in1.sip.videosdk.live",
+        "user": "+918065354620",
+        "transport": "udp"
+      },
+      "headers": {
+        "call-id": "85f5483d-4fcc-1240-afac-0a7d8e35d6e5"
+      }
+    },
+    "pcapFilePath": "pcaps/f1438217-7279-47d5-81d9-92b29b19e188.pcap",
+    "pcapUrl": "https://cdn.videosdk.live/pcaps/f1438217-7279-47d5-81d9-92b29b19e188.pcap"
+  }
+}

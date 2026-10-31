@@ -1,0 +1,64 @@
+{
+  "statusCode": 200,
+  "data": {
+    "id": "07ea02b3-a7e1-4c17-af23-15e21ae8a2f7",
+    "type": "outbound",
+    "transport": "sip",
+    "gatewayId": "221fd865-aec6-4c2b-8103-3f2b53df2752",
+    "ruleId": "rr_q8y23w",
+    "roomId": "jltk-e5qc-ta9h",
+    "to": "+918117935016",
+    "from": "+918065354620",
+    "transfer": [],
+    "sessionId": "6ae620a49ec2f99a51e9599c",
+    "status": "ended",
+    "start": "2026-10-31T17:08:52.498Z",
+    "end": "2026-10-31T17:09:50.279Z",
+    "timelog": [
+      {
+        "timestamp": "2026-10-31T17:08:52.496Z",
+        "status": "initiated",
+        "_id": "6ae620a454f1cdc15b7629eb"
+      },
+      {
+        "timestamp": "2026-10-31T17:08:58.379Z",
+        "status": "ringing",
+        "_id": "6ae620aa8abbe13abd75be58"
+      },
+      {
+        "timestamp": "2026-10-31T17:09:50.029Z",
+        "status": "missed",
+        "message": "status 480 Callee currently unavailable",
+        "_id": "6ae620deb444cbfa22b3ea24"
+      },
+      {
+        "timestamp": "2026-10-31T17:09:50.504Z",
+        "status": "ended",
+        "message": "Call ended by server",
+        "_id": "6ae620de3642a36ee36786e7"
+      }
+    ],
+    "region": "in002",
+    "additionalDetails": {
+      "dispatchMessage": "Agent dispatch requested successfully.",
+      "fromDetails": {
+        "uri": "sip:+918065354620@in1.sip.videosdk.live:5060",
+        "family": "ipv4",
+        "host": "in1.sip.videosdk.live",
+        "user": "+918065354620",
+        "transport": "udp"
+      },
+      "toDetails": {
+        "uri": "sip:+918117935016@8255a51d.sip.vobiz.ai",
+        "family": "ipv4",
+        "host": "in1.sip.videosdk.live",
+        "user": "+918065354620",
+        "transport": "udp"
+      },
+      "headers": {
+        "call-id": "993580bd-4ff0-1240-afac-0a7d8e35d6e5"
+      }
+    },
+    "pcapUrl": null
+  }
+}

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PodHub Calling Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <span>PodHub Calling</span>
+      <span class="brand-badge">Phase 2</span>
+    </div>
+    <div class="connection-status">
+      <div id="sse-dot" class="status-dot"></div>
+      <span id="sse-text">Connecting...</span>
+    </div>
+  </header>
+
+  <div class="main-container">
+    <!-- Left Sidebar: Start Call & Calls List -->
+    <aside class="sidebar">
+      <div class="start-form">
+        <div class="form-group">
+          <label for="phone-input">Start Outbound Call</label>
+          <div class="form-row">
+            <input type="tel" id="phone-input" placeholder="+91XXXXXXXXXX" value="+91">
+            <button type="button" id="start-btn" class="btn-primary">Start Call</button>
+          </div>
+          <div id="form-error" class="error-banner"></div>
+        </div>
+      </div>
+
+      <div class="calls-header">
+        <span>Recent Calls</span>
+        <span id="call-count">0</span>
+      </div>
+
+      <ul id="calls-list" class="calls-list"></ul>
+    </aside>
+
+    <!-- Main Panel: Selected Call Details -->
+    <main class="content-area">
+      <div id="empty-state" class="empty-state">
+        <h3>No Call Selected</h3>
+        <p>Select a call from the list or enter a number above to start a new outbound call.</p>
+      </div>
+
+      <div id="details-card" class="card" style="display: none;">
+        <div class="card-title">
+          <span id="detail-phone">+91...</span>
+          <span id="detail-badge" class="badge badge-queued">queued</span>
+        </div>
+
+        <div class="grid-details">
+          <div class="detail-item">
+            <span class="detail-label">Call ID</span>
+            <span id="detail-id" class="detail-value">-</span>
+          </div>
+
+          <div class="detail-item">
+            <span class="detail-label">Room ID</span>
+            <span id="detail-room" class="detail-value">-</span>
+          </div>
+
+          <div class="detail-item">
+            <span class="detail-label">Provider Call ID</span>
+            <span id="detail-provider-call" class="detail-value">-</span>
+          </div>
+
+          <div class="detail-item">
+            <span class="detail-label">Worker State</span>
+            <span id="detail-worker-state" class="detail-value">-</span>
+          </div>
+
+          <div class="detail-item">
+            <span class="detail-label">Last Provider Update</span>
+            <span id="detail-poll-time" class="detail-value">Never</span>
+          </div>
+
+          <div class="detail-item">
+            <span class="detail-label">Created At</span>
+            <span id="detail-created" class="detail-value">-</span>
+          </div>
+        </div>
+
+        <div id="detail-error" class="detail-alert" style="display: none;"></div>
+      </div>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
+

@@ -1,0 +1,42 @@
+{
+  "statusCode": 200,
+  "data": {
+    "id": "f8fcf8e1-2c9e-4bfb-a6b6-810196334402",
+    "type": "outbound",
+    "transport": "sip",
+    "gatewayId": "221fd865-aec6-4c2b-8103-3f2b53df2752",
+    "ruleId": "rr_q8y23w",
+    "roomId": "96cy-e8jn-50dc",
+    "to": "+918117935016",
+    "from": "+918065354620",
+    "transfer": [],
+    "sessionId": "6ae611653642a36ee367531f",
+    "status": "answered",
+    "start": "2026-10-31T16:03:49.421Z",
+    "timelog": [
+      {
+        "timestamp": "2026-10-31T16:03:49.419Z",
+        "status": "initiated",
+        "_id": "6ae61165e4a288e63f8152d3"
+      },
+      {
+        "timestamp": "2026-10-31T16:03:57.767Z",
+        "status": "ringing",
+        "_id": "6ae6116d9ec2f99a51e9312b"
+      },
+      {
+        "timestamp": "2026-10-31T16:04:05.205Z",
+        "status": "answered",
+        "_id": "6ae61175fd675fa7faa4381e"
+      }
+    ],
+    "region": "in002",
+    "additionalDetails": {
+      "dispatchMessage": "Agent dispatch requested successfully.",
+      "headers": {
+        "call-id": "83fe74c7-4fe7-1240-afac-0a7d8e35d6e5"
+      }
+    },
+    "pcapUrl": null
+  }
+}

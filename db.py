@@ -137,6 +137,16 @@ def is_any_call_in_flight(db_path: Optional[Path | str] = None) -> bool:
     return is_any_call_active(db_path=db_path)
 
 
+def get_active_calls(db_path: Optional[Path | str] = None) -> List[Dict[str, Any]]:
+    placeholders = ",".join("?" for _ in ACTIVE_STATUSES)
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            f"SELECT * FROM calls WHERE status IN ({placeholders})",
+            ACTIVE_STATUSES,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 def update_call(call_id: str, db_path: Optional[Path | str] = None, **fields) -> None:
     if not fields:
         return
@@ -211,3 +221,48 @@ def get_call_transcript(call_id: str, db_path: Optional[Path | str] = None) -> L
             except Exception:
                 continue
         return result
+
+
+def get_events_after(
+    after_id: int,
+    event_types: Optional[List[str]] = None,
+    limit: int = 100,
+    db_path: Optional[Path | str] = None,
+) -> List[Dict[str, Any]]:
+    query = "SELECT id, call_id, event_key, type, payload_json, received_at FROM call_events WHERE id > ?"
+    params: List[Any] = [after_id]
+    if event_types:
+        placeholders = ",".join("?" for _ in event_types)
+        query += f" AND type IN ({placeholders})"
+        params.extend(event_types)
+    query += " ORDER BY id ASC LIMIT ?"
+    params.append(limit)
+
+    with get_connection(db_path) as conn:
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+
+def record_call_updated_event(
+    call_id: str,
+    new_status: Optional[str] = None,
+    worker_state: Optional[str] = None,
+    db_path: Optional[Path | str] = None,
+) -> int:
+    tag_status = new_status or ""
+    tag_worker = worker_state or ""
+    event_key = f"call-updated-{call_id}-{tag_status}-{tag_worker}-{utc_now_iso()}"
+    payload: Dict[str, Any] = {"call_id": call_id}
+    if new_status is not None:
+        payload["status"] = new_status
+    if worker_state is not None:
+        payload["worker_state"] = worker_state
+    payload_json = json.dumps(payload)
+    event_id, _, _ = save_call_event(
+        call_id=call_id,
+        event_key=event_key,
+        event_type="call.updated",
+        payload_json=payload_json,
+        db_path=db_path,
+    )
+    return event_id

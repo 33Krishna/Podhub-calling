@@ -17,6 +17,7 @@ class TestResilience(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         backend.ENABLE_DISPATCHER = False
+        backend.ENABLE_POLLER = False
         if TEST_DB_PATH.exists():
             TEST_DB_PATH.unlink()
         cls.db_patch = patch.object(db, "DEFAULT_DB_PATH", TEST_DB_PATH)
