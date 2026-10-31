@@ -34,7 +34,7 @@ def dial(target: str) -> dict:
         resp = requests.post(API_URL, json=payload, headers=headers, timeout=20)
     except requests.RequestException as exc:
         logger.error("Network error while contacting VideoSDK: %s", exc)
-        sys.exit(3)
+        raise
 
     if resp.status_code >= 400:
         logger.error("VideoSDK returned %s: %s", resp.status_code, resp.text)
@@ -55,13 +55,19 @@ def dial(target: str) -> dict:
             )
         resp.raise_for_status()
 
-    data = resp.json()
+    raw = resp.json()
+    data = raw.get("data", raw)
     logger.info("Call initiated.")
     logger.info("  roomId:    %s", data.get("roomId"))
-    logger.info("  sipCallId: %s", data.get("sipCallId") or data.get("callId"))
+    logger.info("  callId:    %s", data.get("id") or data.get("callId") or data.get("sipCallId"))
     logger.info("  status:    %s", data.get("status"))
-    logger.debug("Full response: %s", data)
-    return data
+    logger.debug("Full response: %s", raw)
+    return {
+        "provider_call_id": data.get("id") or data.get("callId") or data.get("sipCallId"),
+        "room_id": data.get("roomId"),
+        "status": data.get("status"),
+        "raw": raw,
+    }
 
 
 def main() -> None:
@@ -70,7 +76,11 @@ def main() -> None:
         sys.exit(1)
 
     target = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_TARGET
-    dial(target)
+    try:
+        dial(target)
+    except Exception as exc:
+        logger.error("Dial failed: %s", exc)
+        sys.exit(3)
 
 
 if __name__ == "__main__":

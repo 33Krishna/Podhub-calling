@@ -1,6 +1,6 @@
+import asyncio
 import logging
 import os
-import signal
 import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -18,6 +18,8 @@ from videosdk.agents import (
 )
 from videosdk.plugins.google import GeminiRealtime, GeminiLiveConfig
 
+from worker_bridge import WorkerBridge
+
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,7 +27,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-PROMPT_PATH = Path(__file__).parent / "PROMPT.md"
+PROMPT_PATH = Path(__file__).parent / "prompt.md"
 IST = timezone(timedelta(hours=5, minutes=30))
 
 AGENT_NAME = "Ananya"
@@ -106,12 +108,13 @@ Worker.__init__ = _patched_worker_init
 # Agent
 # ---------------------------------------------------------------------------
 class VoiceAssistant(Agent):
-    def __init__(self):
+    def __init__(self, bridge: Optional[WorkerBridge] = None):
         super().__init__(
             instructions=AGENT_INSTRUCTIONS,
             agent_id=AGENT_ID,
         )
         self.name = AGENT_NAME
+        self.bridge = bridge
 
     async def on_enter(self) -> None:
         logger.info("Agent entered call session.")
@@ -119,12 +122,15 @@ class VoiceAssistant(Agent):
             raise RuntimeError("Agent session was not bound before on_enter")
 
         greeting = current_greeting()
-        await self.session.say(
+        greeting_text = (
             f"Hi, {greeting}! Main Ananya bol rahi hoon PodHub Mumbai se. "
             "Main ek AI assistant hoon. Main sirf do minute lungi. "
             "Abhi baat kar sakte hain?"
         )
+        await self.session.say(greeting_text)
         logger.info("Beat 1 greeting dispatched (greeting=%s); awaiting prospect.", greeting)
+        if self.bridge:
+            self.bridge.send_transcript(speaker="agent", text=greeting_text)
 
     async def on_exit(self) -> None:
         logger.info("Agent exiting call session.")
@@ -134,7 +140,8 @@ class VoiceAssistant(Agent):
 # Entrypoint
 # ---------------------------------------------------------------------------
 async def entrypoint(ctx: JobContext):
-    agent = VoiceAssistant()
+    bridge = WorkerBridge()
+    agent = VoiceAssistant(bridge=bridge)
     realtime = GeminiRealtime(
         api_key=GOOGLE_API_KEY,
         model="gemini-3.1-flash-live-preview",
@@ -143,27 +150,74 @@ async def entrypoint(ctx: JobContext):
             response_modalities=["AUDIO"],
         ),
     )
+
+    # ---------------------------------------------------------------------------
+    # TEMP DEBUG: Diagnostic logging for SDK events & config
+    # ---------------------------------------------------------------------------
+    sdk_log_path = Path(__file__).parent / "sdk_events.log"
+    try:
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        in_cfg = getattr(realtime.config, "input_audio_transcription", None)
+        out_cfg = getattr(realtime.config, "output_audio_transcription", None)
+        cfg_line = f"[{now_str}] [CONFIG] input_audio_transcription={in_cfg!r} output_audio_transcription={out_cfg!r}\n"
+        with open(sdk_log_path, "a", encoding="utf-8") as f:
+            f.write(cfg_line)
+        logger.info("[TEMP DEBUG] %s", cfg_line.strip())
+    except Exception as exc:
+        logger.error("[TEMP DEBUG] Failed to write initial SDK config log: %s", exc)
+
+    _orig_emit = realtime.emit
+
+    def _debug_emit(event, *args):
+        try:
+            now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            short_args = []
+            for a in args:
+                if isinstance(a, dict) and "text" in a and isinstance(a["text"], str):
+                    a_copy = dict(a)
+                    if len(a_copy["text"]) > 80:
+                        a_copy["text"] = a_copy["text"][:80] + "..."
+                    short_args.append(a_copy)
+                else:
+                    repr_str = repr(a)
+                    short_args.append(repr_str[:80] + "..." if len(repr_str) > 80 else repr_str)
+            log_entry = f"[{now_iso}] event={event!r} args={short_args}\n"
+            with open(sdk_log_path, "a", encoding="utf-8") as f:
+                f.write(log_entry)
+            logger.info("[TEMP DEBUG SDK EVENT] %s", log_entry.strip())
+        except Exception as exc:
+            logger.error("[TEMP DEBUG] Error in _debug_emit: %s", exc)
+        return _orig_emit(event, *args)
+
+    realtime.emit = _debug_emit
+    # ---------------------------------------------------------------------------
+    # Register synchronous event callbacks before starting session (Section D.4)
+    realtime.on("realtime_model_transcription", bridge.on_transcription)
+    realtime.on("error", bridge.on_realtime_error)
+
     pipeline = Pipeline(llm=realtime)
     session = AgentSession(agent=agent, pipeline=pipeline)
 
+    # Windows clean shutdown callback (Section D.7)
+    ctx.add_shutdown_callback(bridge.cleanup_bridge)
+
     await ctx.connect()
+    room_id = ctx.room_options.room_id if ctx.room_options else None
+    if not room_id:
+        logger.error("CRITICAL: ctx.room_options.room_id is None! Cannot map worker session to dashboard call record.")
+    else:
+        asyncio.create_task(bridge.start(room_id))
+
     await ctx.run_until_shutdown(session=session)
 
 
 # ---------------------------------------------------------------------------
 # Shutdown + main
 # ---------------------------------------------------------------------------
-def shutdown_handler(signum, _frame):
-    logger.info("Received signal %s; worker shutdown requested.", signum)
-
-
 def main() -> None:
     if not VIDEOSDK_TOKEN or not GOOGLE_API_KEY:
         logger.error("Missing VIDEOSDK_TOKEN or GOOGLE_API_KEY in environment.")
         sys.exit(1)
-
-    signal.signal(signal.SIGINT, shutdown_handler)
-    signal.signal(signal.SIGTERM, shutdown_handler)
 
     options = WorkerOptions(
         entrypoint_fnc=entrypoint,
@@ -179,8 +233,7 @@ def main() -> None:
     )
 
     logger.info("Registering Ananya worker as '%s'...", AGENT_ID)
-    worker = Worker(options=options, default_room_options=default_room_options)
-    worker.run_worker(options=options, default_room_options=default_room_options)
+    Worker.run_worker(options=options, default_room_options=default_room_options)
 
 
 if __name__ == "__main__":

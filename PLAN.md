@@ -79,6 +79,7 @@ Delivery target: working demo by Day 5, verification Day 6, stakeholder demo Day
 - `dashboard.html`, served at `GET /`: phone input, Start Call button, call list, selected-call panel.
 - `GET /calls/stream` (SSE — Server-Sent Events: a connection that pushes backend updates to the page).
 - Polling VideoSDK about every 3 seconds while a call is active; each poll saves the raw response to `calls.provider_raw_json`.
+- Save real VideoSDK polling responses during active calls to `fixtures/day2/` as raw JSON fixtures.
 - Normalise real provider responses into dashboard statuses.
 - Display "last provider update" time.
 - Register `GET /calls/stream` before `GET /calls/{id}` so the router doesn't treat "stream" as an ID.
@@ -421,14 +422,16 @@ raw = resp.json()
 data = raw.get("data", raw)
 
 return {
-    "provider_call_id": data.get("callId") or data.get("sipCallId"),
+    "provider_call_id": data.get("id") or data.get("callId") or data.get("sipCallId"),
     "room_id": data.get("roomId"),
     "status": data.get("status"),
 }
 ```
-The backend caller saves these against the internal call ID immediately. Database writes stay out of `dial.py`.
+The real VideoSDK SIP API response stores the call identifier in `data.id` (not `callId` or `sipCallId`). The backend caller saves these against the internal call ID immediately. Database writes stay out of `dial.py`.
 
-If the HTTP response succeeds but identifiers are missing, mark the attempt `unknown`. Do not declare a safe failure. Do not redial.
+The provider's raw status is `"initiated"`, which does not exist in `calls.status` CHECK constraints; the backend maps this to `'dialing'` on successful dial while preserving the raw status in `calls.provider_raw_json`.
+
+If the HTTP response succeeds but identifiers are missing, mark the attempt `unknown` and preserve partial `room_id` if present. Do not declare a safe failure. Do not redial.
 
 ### D.3 How the worker discovers `call_id`
 The backend generates `call_id` before dialing (VideoSDK does not). The worker finds it through the room:
@@ -439,12 +442,15 @@ The backend generates `call_id` before dialing (VideoSDK does not). The worker f
 
 The dial response can arrive after the worker joins. Retry only this local lookup, briefly, while holding early transcript events in memory. **Never repeat the telephone dial request.** One active call at a time makes room matching reliable. Do not run command-line calls while using the dashboard.
 
-### D.4 Transcript callbacks (must be proven live on Day 1)
+### D.4 Transcript callbacks (PROVEN on Day 1)
 In `entrypoint(ctx)`, right after constructing `realtime = GeminiRealtime(...)` and before starting the session, register:
 ```python
 realtime.on("realtime_model_transcription", on_transcription)
 ```
-The installed plugin source contains this event, emitting something like `{"role": "user" | "agent", "text": "...", "is_final": true}`. **Whether it actually fires in the current live configuration is NOT yet proven; Day 1 must prove it with a real call.**
+**Day 1 verification result: PROVEN.** The callback fires live in production configuration:
+- Emits user turn end (`accumulated_input_text`, mapped `user` → `prospect`) and agent turn complete (`final_transcription`, mapped `agent` → `agent`).
+- `session.say()` does NOT produce a callback event; `VoiceAssistant.on_enter()` explicitly sends the greeting text as `transcript.final` (speaker `agent`) via the bridge.
+- Upon hangup/call termination, any incomplete final agent reply currently in flight is lost.
 
 The callback:
 - Maps `user` → `prospect`, `agent` → `agent`.
@@ -454,11 +460,7 @@ The callback:
 
 Important: the SDK's event emitter needs a **synchronous** callback. The callback schedules an async task; do not register an `async def` directly. Track pending HTTP tasks in a small set (not a call queue).
 
-Also register `realtime.on("error", on_realtime_error)` and send a sanitised `worker.error` event.
-
-For the greeting in `VoiceAssistant.on_enter()`: first test whether `session.say()` already produces a final transcript callback; add an explicit greeting event only if it does not.
-
-**Fallback if the callback does not fire:** try reading the session's conversation history (e.g. `get_context_history()` or equivalent in the installed SDK) and push the transcript from it at intervals and at shutdown. The coding assistant must verify the exact name in the installed SDK source, test it in a real call, and report. If neither the callback nor the fallback produces a transcript, **STOP and tell the PM before building the UI.**
+Also register `realtime.on("error", on_realtime_error)`. Suppress normal shutdown error `"Receive loop cancelled"` (log as info only) and do not emit a `worker.error` event for it.
 
 ### D.5 Heartbeat and outcome
 - Send `worker.started` after the session starts.

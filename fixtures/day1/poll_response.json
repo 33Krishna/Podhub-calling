@@ -1,0 +1,26 @@
+{
+  "statusCode": 200,
+  "data": {
+    "id": "8ec1fe49-c916-40f7-96b6-94f40fc66d2b",
+    "type": "outbound",
+    "transport": "sip",
+    "gatewayId": "221fd865-aec6-4c2b-8103-3f2b53df2752",
+    "ruleId": "rr_q8y23w",
+    "roomId": "f6ut-rfda-iia5",
+    "to": "+918117935016",
+    "from": "+918065354620",
+    "transfer": [],
+    "status": "initiated",
+    "start": "2026-10-31T12:22:12.660Z",
+    "timelog": [
+      {
+        "timestamp": "2026-10-31T12:22:12.657Z",
+        "status": "initiated",
+        "_id": "6ae5dd74fbba7d5d976e7183"
+      }
+    ],
+    "region": "in002",
+    "additionalDetails": {},
+    "pcapUrl": null
+  }
+}
