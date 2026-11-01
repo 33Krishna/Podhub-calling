@@ -158,6 +158,28 @@ button.btn-primary:disabled {
   cursor: not-allowed;
 }
 
+button.btn-danger {
+  background: var(--danger);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.15s ease;
+  white-space: nowrap;
+}
+
+button.btn-danger:hover:not(:disabled) {
+  background: #dc2626;
+}
+
+button.btn-danger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .error-banner {
   margin-top: 8px;
   padding: 8px 12px;
@@ -278,6 +300,18 @@ button.btn-primary:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.card-title-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.card-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .grid-details {

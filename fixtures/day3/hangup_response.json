@@ -1,0 +1,56 @@
+{
+  "message": "Call ended successfully",
+  "data": {
+    "id": "a187f654-f441-4f2f-b0a7-470a7d304b7d",
+    "type": "outbound",
+    "transport": "sip",
+    "gatewayId": "221fd865-aec6-4c2b-8103-3f2b53df2752",
+    "ruleId": "rr_q8y23w",
+    "roomId": "r660-2dez-wcyh",
+    "to": "+918117935016",
+    "from": "+918065354620",
+    "transfer": [],
+    "sessionId": "6ae7742f6cd73e34ba1954a3",
+    "status": "answered",
+    "start": "2026-11-01T17:17:35.770Z",
+    "timelog": [
+      {
+        "timestamp": "2026-11-01T17:17:35.767Z",
+        "status": "initiated",
+        "_id": "6ae7742f668b22a4d4e2b326"
+      },
+      {
+        "timestamp": "2026-11-01T17:17:41.453Z",
+        "status": "ringing",
+        "_id": "6ae77435b444cbfa22b911a0"
+      },
+      {
+        "timestamp": "2026-11-01T17:17:48.491Z",
+        "status": "answered",
+        "_id": "6ae7743c6cf163b198198e8f"
+      }
+    ],
+    "region": "in002",
+    "additionalDetails": {
+      "dispatchMessage": "Agent dispatch requested successfully.",
+      "fromDetails": {
+        "uri": "sip:+918065354620@in1.sip.videosdk.live:5060",
+        "family": "ipv4",
+        "host": "in1.sip.videosdk.live",
+        "user": "+918065354620",
+        "transport": "udp"
+      },
+      "toDetails": {
+        "uri": "sip:+918117935016@8255a51d.sip.vobiz.ai",
+        "family": "ipv4",
+        "host": "in1.sip.videosdk.live",
+        "user": "+918065354620",
+        "transport": "udp"
+      },
+      "headers": {
+        "call-id": "fb774c5c-50ba-1240-afac-0a7d8e35d6e5"
+      }
+    },
+    "pcapUrl": null
+  }
+}

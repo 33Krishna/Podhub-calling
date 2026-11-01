@@ -1,26 +1,3 @@
 {
-  "message": "Call initiated successfully",
-  "data": {
-    "id": "c7639ca1-d880-4065-81e8-bd409589b567",
-    "type": "outbound",
-    "transport": "sip",
-    "gatewayId": "221fd865-aec6-4c2b-8103-3f2b53df2752",
-    "ruleId": "rr_q8y23w",
-    "roomId": "3yuc-l7od-g0fe",
-    "to": "+918117935016",
-    "from": "+918065354620",
-    "transfer": [],
-    "status": "initiated",
-    "start": "2026-10-31T18:14:14.512Z",
-    "timelog": [
-      {
-        "timestamp": "2026-10-31T18:14:14.510Z",
-        "status": "initiated",
-        "_id": "6ae62ff66296ade4780d6076"
-      }
-    ],
-    "region": "in002",
-    "additionalDetails": {},
-    "pcapUrl": null
-  }
+  "status": "ok"
 }

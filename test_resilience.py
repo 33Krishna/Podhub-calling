@@ -1,3 +1,5 @@
+import test_support
+
 import asyncio
 import os
 import unittest
@@ -10,7 +12,7 @@ from fastapi.testclient import TestClient
 import backend
 import db
 
-TEST_DB_PATH = Path(__file__).parent / "test_resilience.sqlite"
+TEST_DB_PATH = test_support.TEST_DB_PATH
 
 
 class TestResilience(unittest.TestCase):
@@ -18,31 +20,20 @@ class TestResilience(unittest.TestCase):
     def setUpClass(cls):
         backend.ENABLE_DISPATCHER = False
         backend.ENABLE_POLLER = False
-        if TEST_DB_PATH.exists():
-            TEST_DB_PATH.unlink()
-        cls.db_patch = patch.object(db, "DEFAULT_DB_PATH", TEST_DB_PATH)
-        cls.db_patch.start()
-        db.init_db(TEST_DB_PATH)
 
     @classmethod
     def tearDownClass(cls):
-        cls.db_patch.stop()
-        if TEST_DB_PATH.exists():
-            try:
-                TEST_DB_PATH.unlink()
-            except Exception:
-                pass
+        pass
 
     def setUp(self):
         with db.get_connection(TEST_DB_PATH) as conn:
             conn.execute("DELETE FROM call_events")
             conn.execute("DELETE FROM calls")
         backend.dispatch_paused = False
-        # Enable allow_real_dial for mock testing
-        os.environ["PODHUB_ALLOW_REAL_DIAL"] = "1"
+        os.environ["PODHUB_ALLOW_REAL_DIAL"] = "0"
 
     def tearDown(self):
-        os.environ.pop("PODHUB_ALLOW_REAL_DIAL", None)
+        os.environ["PODHUB_ALLOW_REAL_DIAL"] = "0"
 
     def test_idempotency_rules(self):
         """Verify POST /calls creates or replays call, and rejects conflict."""
@@ -83,7 +74,7 @@ class TestResilience(unittest.TestCase):
         mock_error = requests.HTTPError(response=mock_resp)
 
         client = TestClient(backend.app)
-        with patch("backend.dial", side_effect=mock_error) as mock_dial:
+        with patch.dict(os.environ, {"PODHUB_ALLOW_REAL_DIAL": "1"}), patch("backend.dial", side_effect=mock_error) as mock_dial:
             res = client.post(
                 "/calls",
                 json={"phone_number": "+910000000000", "idempotency_key": "key-test-a"},
@@ -118,7 +109,7 @@ class TestResilience(unittest.TestCase):
         }
 
         client = TestClient(backend.app)
-        with patch("backend.dial", return_value=mock_response) as mock_dial:
+        with patch.dict(os.environ, {"PODHUB_ALLOW_REAL_DIAL": "1"}), patch("backend.dial", return_value=mock_response) as mock_dial:
             res1 = client.post(
                 "/calls",
                 json={"phone_number": "+919876543210", "idempotency_key": "key-test-b-1"},
@@ -163,7 +154,7 @@ class TestResilience(unittest.TestCase):
         mock_timeout = requests.Timeout("Connection timed out after 20 seconds")
 
         client = TestClient(backend.app)
-        with patch("backend.dial", side_effect=mock_timeout) as mock_dial:
+        with patch.dict(os.environ, {"PODHUB_ALLOW_REAL_DIAL": "1"}), patch("backend.dial", side_effect=mock_timeout) as mock_dial:
             res = client.post(
                 "/calls",
                 json={"phone_number": "+919876543210", "idempotency_key": "key-test-c"},
@@ -209,7 +200,7 @@ class TestResilience(unittest.TestCase):
         }
 
         client = TestClient(backend.app)
-        with patch("backend.dial", return_value=mock_dial_result) as mock_dial:
+        with patch.dict(os.environ, {"PODHUB_ALLOW_REAL_DIAL": "1"}), patch("backend.dial", return_value=mock_dial_result) as mock_dial:
             res = client.post(
                 "/calls",
                 json={"phone_number": "+919999999999", "idempotency_key": "key-real-shape"},

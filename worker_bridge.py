@@ -1,6 +1,8 @@
 import asyncio
 import json
 import logging
+import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -15,6 +17,15 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def normalize_transcript(text: str) -> str:
+    if not text:
+        return ""
+    t = text.lower()
+    t = re.sub(r"[^\w\s]", "", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
 class WorkerBridge:
     def __init__(self, backend_url: str = "http://127.0.0.1:8000"):
         self.backend_url = backend_url.rstrip("/")
@@ -27,6 +38,8 @@ class WorkerBridge:
         self._heartbeat_task: Optional[asyncio.Task] = None
         self._running: bool = True
         self._lock = asyncio.Lock()
+        self.last_greeting_norm: Optional[str] = None
+        self.last_greeting_time: Optional[float] = None
 
     def _get_client(self) -> httpx.AsyncClient:
         if self.client is None or self.client.is_closed:
@@ -40,6 +53,20 @@ class WorkerBridge:
                 f.write(line)
         except Exception as exc:
             logger.error("Failed to write to raw transcript log: %s", exc)
+
+    def is_duplicate_greeting(self, text: str) -> bool:
+        if not self.last_greeting_norm or self.last_greeting_time is None:
+            return False
+        if time.time() - self.last_greeting_time > 60.0:
+            return False
+        incoming_norm = normalize_transcript(text)
+        if not incoming_norm:
+            return False
+        if incoming_norm == self.last_greeting_norm:
+            return True
+        if incoming_norm.startswith(self.last_greeting_norm) or self.last_greeting_norm.startswith(incoming_norm):
+            return True
+        return False
 
     def on_transcription(self, data: Any) -> None:
         """
@@ -61,11 +88,15 @@ class WorkerBridge:
                 return
 
             speaker = "prospect" if role == "user" else "agent"
-            self.send_transcript(speaker=speaker, text=text)
+            if speaker == "agent" and self.is_duplicate_greeting(text):
+                logger.info("Skipping duplicate greeting transcription: %r", text)
+                return
+
+            self.send_transcript(speaker=speaker, text=text, from_realtime=True)
         except Exception as exc:
             logger.error("Error in on_transcription callback: %s", exc)
 
-    def send_transcript(self, speaker: str, text: str) -> None:
+    def send_transcript(self, speaker: str, text: str, from_realtime: bool = False) -> None:
         """
         Explicitly dispatch a final transcript segment (e.g. initial greeting).
         """
@@ -73,6 +104,12 @@ class WorkerBridge:
             cleaned = (text or "").strip()
             if not cleaned:
                 return
+
+            # Track explicit agent greeting for 60s duplicate suppression
+            if not from_realtime and speaker == "agent":
+                self.last_greeting_norm = normalize_transcript(cleaned)
+                self.last_greeting_time = time.time()
+
             self.seq += 1
             event_data = {
                 "type": "transcript.final",

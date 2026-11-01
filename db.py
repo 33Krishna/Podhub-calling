@@ -1,11 +1,22 @@
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-DEFAULT_DB_PATH = Path(__file__).parent / "calls.sqlite"
+REAL_CALLS_DB_PATH = (Path(__file__).parent / "calls.sqlite").resolve()
+
+
+def get_default_db_path() -> Path:
+    env_path = os.getenv("PODHUB_DB_PATH")
+    if env_path:
+        return Path(env_path)
+    return REAL_CALLS_DB_PATH
+
+
+DEFAULT_DB_PATH = get_default_db_path()
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 
 ACTIVE_STATUSES = ("dialing", "ringing", "connected", "hangup_requested")
@@ -16,10 +27,22 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def get_resolved_path(db_path: Optional[Path | str] = None) -> Path:
+    if db_path:
+        return Path(db_path).resolve()
+    return get_default_db_path().resolve()
+
+
 @contextmanager
 def get_connection(db_path: Optional[Path | str] = None):
-    path = str(db_path or DEFAULT_DB_PATH)
-    conn = sqlite3.connect(path, timeout=5.0)
+    resolved_path = get_resolved_path(db_path)
+
+    # Hard guard: If testing is active, never allow touching the real calls.sqlite
+    if os.getenv("PODHUB_TESTING") == "1" and resolved_path == REAL_CALLS_DB_PATH:
+        raise RuntimeError("Tests must never use the real calls.sqlite")
+
+    path_str = str(resolved_path)
+    conn = sqlite3.connect(path_str, timeout=5.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
     conn.execute("PRAGMA busy_timeout = 5000;")
@@ -34,7 +57,7 @@ def get_connection(db_path: Optional[Path | str] = None):
 
 
 def init_db(db_path: Optional[Path | str] = None) -> None:
-    path = str(db_path or DEFAULT_DB_PATH)
+    path = get_resolved_path(db_path)
     schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
     with get_connection(path) as conn:
         conn.executescript(schema_sql)
@@ -121,6 +144,14 @@ def get_oldest_queued_call(db_path: Optional[Path | str] = None) -> Optional[Dic
             "SELECT * FROM calls WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1"
         ).fetchone()
         return dict(row) if row else None
+
+
+def get_all_queued_calls(db_path: Optional[Path | str] = None) -> List[Dict[str, Any]]:
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM calls WHERE status = 'queued' ORDER BY created_at ASC"
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def is_any_call_active(db_path: Optional[Path | str] = None) -> bool:

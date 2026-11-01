@@ -1,3 +1,5 @@
+import test_support
+
 import asyncio
 import json
 import os
@@ -12,7 +14,7 @@ from fastapi.testclient import TestClient
 import backend
 import db
 
-TEST_DB_PATH = Path(__file__).parent / "test_phase2.sqlite"
+TEST_DB_PATH = test_support.TEST_DB_PATH
 FIXTURES_TEST_DIR = Path(__file__).parent / "fixtures" / "day2_test"
 
 
@@ -23,12 +25,6 @@ class TestPhase2(unittest.TestCase):
         backend.ENABLE_DISPATCHER = False
         backend.ENABLE_POLLER = False
 
-        if TEST_DB_PATH.exists():
-            TEST_DB_PATH.unlink()
-        cls.db_patch = patch.object(db, "DEFAULT_DB_PATH", TEST_DB_PATH)
-        cls.db_patch.start()
-        db.init_db(TEST_DB_PATH)
-
         if FIXTURES_TEST_DIR.exists():
             shutil.rmtree(FIXTURES_TEST_DIR)
         FIXTURES_TEST_DIR.mkdir(parents=True, exist_ok=True)
@@ -38,12 +34,6 @@ class TestPhase2(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.fixtures_patch.stop()
-        cls.db_patch.stop()
-        if TEST_DB_PATH.exists():
-            try:
-                TEST_DB_PATH.unlink()
-            except Exception:
-                pass
         if FIXTURES_TEST_DIR.exists():
             try:
                 shutil.rmtree(FIXTURES_TEST_DIR)
@@ -55,10 +45,10 @@ class TestPhase2(unittest.TestCase):
             conn.execute("DELETE FROM call_events")
             conn.execute("DELETE FROM calls")
         backend.dispatch_paused = False
-        os.environ["PODHUB_ALLOW_REAL_DIAL"] = "1"
+        os.environ["PODHUB_ALLOW_REAL_DIAL"] = "0"
 
     def tearDown(self):
-        os.environ.pop("PODHUB_ALLOW_REAL_DIAL", None)
+        os.environ["PODHUB_ALLOW_REAL_DIAL"] = "0"
 
     def test_dashboard_page(self):
         """Verify GET / returns 200 with dashboard HTML linking to static assets."""

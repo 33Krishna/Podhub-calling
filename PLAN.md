@@ -110,15 +110,17 @@ Delivery target: working demo by Day 5, verification Day 6, stakeholder demo Day
 
 **NOT in this phase:** Hang Up, recordings, message sending, booking actions.
 
-## Phase 3b — Hang Up
+## Phase 3b — Hang Up [DONE]
 
-**Calendar days:** Day 4 afternoon
+**Calendar days:** Day 4 afternoon — Status: DONE
 
 **What gets built**
 - `POST /calls/{id}/hangup`.
 - Hang Up button on the dashboard.
 - Backend calls VideoSDK's existing call-end API using the saved provider call ID.
 - Dashboard shows "Hangup requested" until polling confirms the call ended.
+
+**Known limitation:** Ringing ke dauran Hang Up dabane par VideoSDK call turant ended karta hai ("Call ended via API hangup"), par carrier ke handset pe ring kuch der chal sakti hai. Demo ke liye Hang Up connected call mein dikhana safe hai.
 
 **PM test:** Click Hang Up during a real call. The phone disconnects, then the dashboard shows the confirmed final status.
 
@@ -546,7 +548,7 @@ Do not turn a worker crash into a claim that the phone call ended.
 | 1:00–2:00 | Say: "We currently record in our office. Editing takes too long." | Prospect text and Ananya's reply under correct speakers. |
 | 2:00–2:30 | Refresh the browser; select the active row if needed. | Transcript returns; same call still active. |
 | 2:30–3:00 | Say: "I'm interested. Please call me tomorrow." | New transcript text appears without refresh. |
-| 3:00–3:30 | Click Hang Up. | "Hangup requested", phone disconnects, then confirmed final status. |
+| 3:00–3:30 | Click Hang Up (connected call). | "Hangup requested", phone disconnects, then confirmed final status. |
 | 3:30–4:30 | Keep the call selected. | Outcome moves from processing to `callback_requested` with a short summary. |
 | 4:30–5:00 | Refresh once more; reopen that call. | Completed status, saved transcript, and outcome remain. |
 

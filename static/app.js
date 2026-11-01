@@ -33,6 +33,8 @@ const detailWorkerState = document.getElementById("detail-worker-state");
 const detailPollTime = document.getElementById("detail-poll-time");
 const detailCreated = document.getElementById("detail-created");
 const detailError = document.getElementById("detail-error");
+const hangupBtn = document.getElementById("hangup-btn");
+const hangupWarning = document.getElementById("hangup-warning");
 
 function generateUUID() {
   if (crypto.randomUUID) return crypto.randomUUID();
@@ -163,6 +165,8 @@ function updateDetailsPanel(call) {
     emptyState.style.display = "block";
     detailsCard.style.display = "none";
     transcriptCard.style.display = "none";
+    if (hangupBtn) hangupBtn.style.display = "none";
+    if (hangupWarning) hangupWarning.style.display = "none";
     return;
   }
   emptyState.style.display = "none";
@@ -180,10 +184,34 @@ function updateDetailsPanel(call) {
   detailPollTime.textContent = formatTime(call.last_provider_poll_at);
   detailCreated.textContent = formatTime(call.created_at);
 
+  // Hang Up button visibility & state
+  if (hangupBtn) {
+    const activeStatuses = ["dialing", "ringing", "connected"];
+    if (activeStatuses.includes(call.status)) {
+      hangupBtn.style.display = "inline-block";
+      hangupBtn.disabled = false;
+      hangupBtn.textContent = "Hang Up";
+    } else if (call.status === "hangup_requested") {
+      hangupBtn.style.display = "inline-block";
+      hangupBtn.disabled = true;
+      hangupBtn.textContent = "Hangup requested...";
+    } else {
+      hangupBtn.style.display = "none";
+    }
+  }
+
+  // Hide timeout warning once call reaches a terminal state
+  if (hangupWarning) {
+    const terminalStatuses = ["completed", "busy", "no_answer", "failed", "unknown"];
+    if (terminalStatuses.includes(call.status)) {
+      hangupWarning.style.display = "none";
+    }
+  }
+
   if (call.error_message) {
     detailError.style.display = "block";
     const status = call.status || "unknown";
-    if (status === "no_answer" || status === "busy") {
+    if (status === "no_answer" || status === "busy" || call.error_message.includes("Hung up from dashboard")) {
       detailError.className = "detail-alert detail-alert-warning";
       detailError.textContent = "Reason: " + call.error_message;
     } else {
@@ -398,6 +426,73 @@ startBtn.onclick = async () => {
     startBtn.textContent = "Start Call";
   }
 };
+
+// Hang Up Button Action
+if (hangupBtn) {
+  hangupBtn.onclick = async () => {
+    if (!selectedCallId) return;
+    const callId = selectedCallId;
+
+    // Rule: Disable button immediately to prevent double-click
+    hangupBtn.disabled = true;
+    hangupBtn.textContent = "Hanging up...";
+    if (hangupWarning) hangupWarning.style.display = "none";
+
+    try {
+      const res = await fetch(`/calls/${callId}/hangup`, {
+        method: "POST",
+      });
+
+      if (res.status === 202) {
+        const data = await res.json();
+        const idx = calls.findIndex(c => c.id === callId);
+        if (idx !== -1) {
+          calls[idx].status = "hangup_requested";
+          renderCallsList();
+        }
+        hangupBtn.disabled = true;
+        hangupBtn.textContent = "Hangup requested...";
+        detailBadge.className = "badge badge-hangup_requested";
+        detailBadge.textContent = "hangup_requested";
+        if (hangupWarning) hangupWarning.style.display = "none";
+      } else if (res.status === 200) {
+        const data = await res.json();
+        const idx = calls.findIndex(c => c.id === callId);
+        if (idx !== -1) {
+          calls[idx].status = data.status;
+          renderCallsList();
+        }
+        selectCall(callId);
+      } else if (res.status === 504) {
+        // 504 Timeout: Show "Hangup unconfirmed" banner and re-enable button for retry
+        if (hangupWarning) {
+          hangupWarning.textContent = "Hangup unconfirmed — request timed out, continuing to poll provider...";
+          hangupWarning.style.display = "block";
+        }
+        hangupBtn.disabled = false;
+        hangupBtn.textContent = "Hang Up";
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        const msg = (errData.detail && errData.detail.error) || "Provider rejected hang up request";
+        if (detailError) {
+          detailError.textContent = "Error: " + msg;
+          detailError.className = "detail-alert detail-alert-danger";
+          detailError.style.display = "block";
+        }
+        hangupBtn.disabled = false;
+        hangupBtn.textContent = "Hang Up";
+      }
+    } catch (err) {
+      if (detailError) {
+        detailError.textContent = "Error: Network error during hang up request";
+        detailError.className = "detail-alert detail-alert-danger";
+        detailError.style.display = "block";
+      }
+      hangupBtn.disabled = false;
+      hangupBtn.textContent = "Hang Up";
+    }
+  };
+}
 
 // Initialize
 loadCalls().then(() => {

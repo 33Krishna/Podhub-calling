@@ -5,6 +5,7 @@ import os
 import re
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -25,6 +26,9 @@ FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
 
 FIXTURES_DAY2_DIR = Path(__file__).parent / "fixtures" / "day2"
 FIXTURES_DAY2_DIR.mkdir(parents=True, exist_ok=True)
+
+FIXTURES_DAY3_DIR = Path(__file__).parent / "fixtures" / "day3"
+FIXTURES_DAY3_DIR.mkdir(parents=True, exist_ok=True)
 
 STATIC_DIR = Path(__file__).parent / "static"
 INDEX_PATH = STATIC_DIR / "index.html"
@@ -111,10 +115,25 @@ def resolve_call_status_and_error(
     raw_status: str,
     timelog: Optional[List[Dict[str, Any]]] = None,
     call_id: Optional[str] = None,
+    current_status: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[str]]:
     if not raw_status:
         return None, None
     s = str(raw_status).strip().lower()
+
+    # Phase 3b: Special handling when status is hangup_requested
+    if current_status == "hangup_requested":
+        # Any terminal/ended/missed status resolves to completed with dashboard reason
+        if s in ("completed", "ended", "terminated", "hangup", "missed", "no-answer", "no_answer", "unanswered"):
+            return "completed", "Hung up from dashboard"
+        elif s in ("failed", "canceled", "cancelled", "rejected"):
+            return "failed", "Call failed after hangup request"
+        elif s == "busy":
+            return "busy", "Busy"
+        elif s in ("initiated", "ringing", "in-progress", "in_progress", "ongoing", "connected", "answered"):
+            # Non-terminal: preserve hangup_requested
+            return "hangup_requested", None
+
     if s in ("completed", "ended", "terminated", "hangup"):
         if not timelog:
             logger.warning(
@@ -387,9 +406,25 @@ async def poll_active_calls() -> None:
                         except Exception as exc:
                             logger.error("Failed to write fixture %s: %s", t_fixture_file, exc)
 
+            # Race condition fix: re-read latest status from DB right before evaluating transition
+            fresh_call = db.get_call_by_id(call_id)
+            if not fresh_call:
+                continue
+            current_status = fresh_call["status"]
+
             normalized, err_msg = resolve_call_status_and_error(
-                raw_status, timelog=timelog, call_id=call_id
+                raw_status, timelog=timelog, call_id=call_id, current_status=current_status
             )
+
+            # Poller must NEVER overwrite hangup_requested with a non-terminal status
+            if current_status == "hangup_requested" and normalized in ("dialing", "ringing", "connected", "hangup_requested", None):
+                logger.info(
+                    "Call %s is in hangup_requested; ignoring non-terminal provider status '%s'",
+                    call_id,
+                    raw_status,
+                )
+                continue
+
             if normalized is None:
                 # Rule 1: Do NOT change status. Log warning, raw response already saved.
                 logger.warning(
@@ -427,11 +462,51 @@ async def poller_loop():
             logger.error("Unhandled error in poller loop: %s", exc)
 
 
+def cleanup_stale_queued_calls(max_age_seconds: float = 120.0) -> int:
+    now = datetime.now(timezone.utc)
+    now_iso = db.utc_now_iso()
+    queued_calls = db.get_all_queued_calls()
+    cleaned = 0
+
+    for call in queued_calls:
+        created_str = call.get("created_at")
+        is_stale = False
+        if created_str:
+            try:
+                created_dt = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+                age = (now - created_dt).total_seconds()
+                if age > max_age_seconds:
+                    is_stale = True
+            except Exception:
+                is_stale = True
+        else:
+            is_stale = True
+
+        if is_stale:
+            logger.warning(
+                "Skipping stale queued call %s on startup (created_at: %s, age > %ss)",
+                call["id"],
+                created_str,
+                max_age_seconds,
+            )
+            db.update_call(
+                call["id"],
+                status="failed",
+                ended_at=now_iso,
+                error_message="Stale queued call skipped on startup",
+            )
+            notify_call_updated(call["id"], "failed")
+            cleaned += 1
+
+    return cleaned
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global dispatcher_task, poller_task, _sse_notify_event
     _sse_notify_event = asyncio.Event()
     db.init_db()
+    cleanup_stale_queued_calls(max_age_seconds=120.0)
     if ENABLE_DISPATCHER:
         dispatcher_task = asyncio.create_task(dispatcher_loop())
     if ENABLE_POLLER:
@@ -458,7 +533,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+class NoCacheStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/static", NoCacheStaticFiles(directory=STATIC_DIR), name="static")
 
 
 class CreateCallRequest(BaseModel):
@@ -518,6 +601,96 @@ async def post_calls(req: CreateCallRequest, response: Response):
         "status": created["status"],
         "replayed": False,
     }
+
+
+@app.post("/calls/{call_id}/hangup")
+async def post_hangup(call_id: str, response: Response):
+    call = db.get_call_by_id(call_id)
+    if not call:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": "Call not found"},
+        )
+
+    current_st = call["status"]
+
+    # Rule: If call is already hangup_requested, do NOT hit provider again; return 200 with current status
+    if current_st == "hangup_requested":
+        response.status_code = status.HTTP_200_OK
+        return {"id": call["id"], "status": current_st}
+
+    # Rule: Hang Up on an already-finished call returns 200 with its current status
+    if current_st in ("completed", "busy", "no_answer", "failed", "unknown"):
+        response.status_code = status.HTTP_200_OK
+        return {"id": call["id"], "status": current_st}
+
+    provider_call_id = call.get("provider_call_id")
+    # Rule: queued or missing provider ID returns 409
+    if current_st == "queued" or not provider_call_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "Call is still queued or has no provider ID"},
+        )
+
+    # Active call: dialing, ringing, connected
+    url = "https://api.videosdk.live/v2/sip/call/end"
+    headers = {
+        "Authorization": VIDEOSDK_TOKEN,
+        "Content-Type": "application/json",
+    }
+    payload = {"callId": provider_call_id}
+
+    logger.info("Sending hangup request to VideoSDK for call %s (provider_call_id: %s)...", call_id, provider_call_id)
+    try:
+        resp = await asyncio.to_thread(
+            requests.post, url, json=payload, headers=headers, timeout=15
+        )
+    except (requests.Timeout, requests.ConnectionError) as exc:
+        logger.error("Hangup request timed out or network error for call %s (%s): %s", call_id, provider_call_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail={"error": "Termination request timed out"},
+        )
+    except Exception as exc:
+        logger.error("Unexpected error during hangup for call %s (%s): %s", call_id, provider_call_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"error": f"Provider error during hangup: {exc}"},
+        )
+
+    if resp.status_code >= 400:
+        logger.error(
+            "Provider rejected hangup for call %s (%s): %s %s",
+            call_id,
+            provider_call_id,
+            resp.status_code,
+            resp.text,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"error": f"Provider rejected hangup request ({resp.status_code}): {resp.text}"},
+        )
+
+    try:
+        raw_body = resp.json()
+    except Exception:
+        raw_body = {"status": "ok", "statusCode": resp.status_code}
+
+    # Save fixture of first real provider hangup response
+    fixture_file = FIXTURES_DAY3_DIR / "hangup_response.json"
+    if not fixture_file.exists():
+        try:
+            with open(fixture_file, "w", encoding="utf-8") as f:
+                json.dump(raw_body, f, indent=2)
+            logger.info("Saved hangup fixture to %s", fixture_file)
+        except Exception as exc:
+            logger.error("Failed to write hangup fixture %s: %s", fixture_file, exc)
+
+    # Provider accepted termination
+    db.update_call(call_id, status="hangup_requested")
+    notify_call_updated(call_id, "hangup_requested")
+    response.status_code = status.HTTP_202_ACCEPTED
+    return {"id": call_id, "status": "hangup_requested"}
 
 
 @app.get("/calls/stream")

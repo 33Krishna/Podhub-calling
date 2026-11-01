@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PodHub Calling Dashboard</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -11,7 +12,7 @@
   <header>
     <div class="brand">
       <span>PodHub Calling</span>
-      <span class="brand-badge">Phase 3a</span>
+      <span class="brand-badge">Phase 3b</span>
     </div>
     <div class="connection-status">
       <div id="sse-dot" class="status-dot"></div>
@@ -50,8 +51,13 @@
 
       <div id="details-card" class="card" style="display: none;">
         <div class="card-title">
-          <span id="detail-phone">+91...</span>
-          <span id="detail-badge" class="badge badge-queued">queued</span>
+          <div class="card-title-left">
+            <span id="detail-phone">+91...</span>
+            <span id="detail-badge" class="badge badge-queued">queued</span>
+          </div>
+          <div class="card-title-actions">
+            <button type="button" id="hangup-btn" class="btn-danger" style="display: none;">Hang Up</button>
+          </div>
         </div>
 
         <div class="grid-details">
@@ -86,6 +92,7 @@
           </div>
         </div>
 
+        <div id="hangup-warning" class="detail-alert detail-alert-warning" style="display: none;"></div>
         <div id="detail-error" class="detail-alert" style="display: none;"></div>
       </div>
 

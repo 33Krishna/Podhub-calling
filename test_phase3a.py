@@ -1,3 +1,5 @@
+import test_support
+
 import asyncio
 import json
 import os
@@ -10,7 +12,7 @@ from fastapi.testclient import TestClient
 import backend
 import db
 
-TEST_DB_PATH = Path(__file__).parent / "test_phase3a.sqlite"
+TEST_DB_PATH = test_support.TEST_DB_PATH
 
 
 class TestPhase3a(unittest.TestCase):
@@ -19,23 +21,9 @@ class TestPhase3a(unittest.TestCase):
         backend.ENABLE_DISPATCHER = False
         backend.ENABLE_POLLER = False
 
-        if TEST_DB_PATH.exists():
-            try:
-                TEST_DB_PATH.unlink()
-            except Exception:
-                pass
-        cls.db_patch = patch.object(db, "DEFAULT_DB_PATH", TEST_DB_PATH)
-        cls.db_patch.start()
-        db.init_db(TEST_DB_PATH)
-
     @classmethod
     def tearDownClass(cls):
-        cls.db_patch.stop()
-        if TEST_DB_PATH.exists():
-            try:
-                TEST_DB_PATH.unlink()
-            except Exception:
-                pass
+        pass
 
     def setUp(self):
         with db.get_connection(TEST_DB_PATH) as conn:
@@ -46,7 +34,7 @@ class TestPhase3a(unittest.TestCase):
         backend.get_sse_notify_event().clear()
 
     def tearDown(self):
-        os.environ.pop("PODHUB_ALLOW_REAL_DIAL", None)
+        os.environ["PODHUB_ALLOW_REAL_DIAL"] = "0"
 
     def test_transcript_final_event_storage_and_sse_trigger(self):
         """Verify POST /internal/calls/{id}/events saves transcript.final and wakes up SSE."""
