@@ -7,3 +7,4 @@ venv/
 *.sqlite-journal
 *.db
 *.log
+fixtures/

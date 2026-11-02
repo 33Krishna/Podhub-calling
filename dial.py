@@ -10,9 +10,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 VIDEOSDK_TOKEN = os.getenv("VIDEOSDK_TOKEN", "").strip()
-ROUTING_RULE_ID = "rr_q8y23w"
-CALLER_ID = "+918065354620"
-DEFAULT_TARGET = "+918117935016"
+ROUTING_RULE_ID = os.getenv("VIDEOSDK_ROUTING_RULE_ID", "").strip()
+CALLER_ID = os.getenv("VIDEOSDK_CALLER_ID", "").strip()
+DEFAULT_TARGET = os.getenv("PODHUB_DEFAULT_TARGET", "").strip()
 
 API_URL = "https://api.videosdk.live/v2/sip/call"
 

@@ -1,0 +1,5 @@
+# Extra packages only needed for test_setup.py (local TTS / setup checks).
+# The app itself (backend.py, main.py) does NOT need these.
+-r requirements.txt
+sanotts
+numpy

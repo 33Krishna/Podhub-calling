@@ -1,8 +1,9 @@
-videosdk-agents
-videosdk-plugins-google
-python-dotenv
-requests
-google-genai
-sanotts
-numpy
-
+videosdk-agents==1.0.30
+videosdk-plugins-google==1.0.30
+fastapi==0.162.0
+uvicorn==0.54.0
+httpx==0.28.1
+pydantic==2.14.2
+python-dotenv==1.2.4
+requests==2.31.0
+google-genai==2.34.0
